@@ -323,5 +323,3 @@ class KAN(torch.nn.Module):
                 params[f"layers.{i}.spline_scaler"]
             )
 
-            self.layers[i+1].in_features  = self.layers[i+1].in_features - count
-
