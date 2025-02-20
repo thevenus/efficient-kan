@@ -9,29 +9,28 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-# Load MNIST
+# Load Fashion MNIST
 transform = transforms.Compose(
     [transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))]
 )
-trainset = torchvision.datasets.MNIST(
+trainset = torchvision.datasets.FashionMNIST(
     root="./data", train=True, download=True, transform=transform
 )
-valset = torchvision.datasets.MNIST(
+valset = torchvision.datasets.FashionMNIST(
     root="./data", train=False, download=True, transform=transform
 )
 trainloader = DataLoader(trainset, batch_size=128, shuffle=True)
-valloader = DataLoader(valset, batch_size=128, shuffle=False)
+valloader = DataLoader(valset, batch_size=4, shuffle=False)
 
 # Define model
 zero_func = lambda x: x*0
-model = KAN([28 * 28, 8, 10], grid_eps=1, base_activation=zero_func, grid_size=5, spline_order=1)
+model = KAN([28 * 28, 64, 48, 10], grid_eps=0.02, base_activation=zero_func, grid_size=10, spline_order=3)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
-print(f"Model has {model.num_params()} number of parameters.")
 # Define optimizer
-optimizer = optim.AdamW(model.parameters(), lr=1e-2, weight_decay=1e-4)
+optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-3)
 # Define learning rate scheduler
-scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)
+scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
 
 # Define loss
 criterion = nn.CrossEntropyLoss()
@@ -56,7 +55,7 @@ for epoch in range(10):
     with torch.no_grad():
         for images, labels in valloader:
             images = images.view(-1, 28 * 28).to(device)
-            output = model(images)
+            output = model(images, update_grid=True)
             val_loss += criterion(output, labels.to(device)).item()
             val_accuracy += (
                 (output.argmax(dim=1) == labels.to(device)).float().mean().item()
@@ -71,4 +70,4 @@ for epoch in range(10):
         f"Epoch {epoch + 1}, Val Loss: {val_loss}, Val Accuracy: {val_accuracy}"
     )
 
-# torch.save(model.state_dict(), "model.pth")
+    torch.save(model.state_dict(), "model.pth")
