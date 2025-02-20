@@ -48,7 +48,7 @@ class KANLinear(torch.nn.Module):
         self.scale_base = scale_base
         self.scale_spline = scale_spline
         self.enable_standalone_scale_spline = enable_standalone_scale_spline
-        self.base_activation = base_activation()
+        self.base_activation = base_activation
         self.grid_eps = grid_eps
 
         self.reset_parameters()
@@ -64,10 +64,11 @@ class KANLinear(torch.nn.Module):
                 * self.scale_noise
                 / self.grid_size
             )
+            grid_selected = self.grid.T if self.spline_order == 0 else self.grid.T[self.spline_order : -self.spline_order]
             self.spline_weight.data.copy_(
                 (self.scale_spline if not self.enable_standalone_scale_spline else 1.0)
                 * self.curve2coeff(
-                    self.grid.T[self.spline_order : -self.spline_order],
+                    grid_selected,
                     noise,
                 )
             )
@@ -212,7 +213,7 @@ class KANLinear(torch.nn.Module):
         )
 
         self.grid.copy_(grid.T)
-        self.spline_weight.data.copy_(self.curve2coeff(x, unreduced_spline_output))
+        # self.spline_weight.data.copy_(self.curve2coeff(x, unreduced_spline_output))
 
     def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
         """
@@ -235,7 +236,9 @@ class KANLinear(torch.nn.Module):
             regularize_activation * regularization_loss_activation
             + regularize_entropy * regularization_loss_entropy
         )
-
+    
+    def num_params(self):
+        return self.spline_weight.numel()
 
 class KAN(torch.nn.Module):
     def __init__(
@@ -253,6 +256,8 @@ class KAN(torch.nn.Module):
         super(KAN, self).__init__()
         self.grid_size = grid_size
         self.spline_order = spline_order
+        self.width = layers_hidden
+        self.cache = []
 
         self.layers = torch.nn.ModuleList()
         for in_features, out_features in zip(layers_hidden, layers_hidden[1:]):
@@ -272,10 +277,12 @@ class KAN(torch.nn.Module):
             )
 
     def forward(self, x: torch.Tensor, update_grid=False):
-        for layer in self.layers:
-            if update_grid:
+        self.cache.append(x)
+        for i, layer in enumerate(self.layers):
+            if update_grid and i != 0:
                 layer.update_grid(x)
             x = layer(x)
+            self.cache.append(x)
         return x
 
     def regularization_loss(self, regularize_activation=1.0, regularize_entropy=1.0):
@@ -283,3 +290,38 @@ class KAN(torch.nn.Module):
             layer.regularization_loss(regularize_activation, regularize_entropy)
             for layer in self.layers
         )
+    
+    def num_params(self):
+        sum_p = 0
+        for layer in self.layers:
+            sum_p += layer.num_params()
+        return sum_p
+    
+    def update_grid_from_samples(self, x: torch.Tensor, margin=0.01):
+        for i, layer in enumerate(self.layers):
+            if (i != 0):
+                layer.update_grid(x, margin)
+            x = layer(x)
+    
+    def update_layer_grid(self, x: torch.Tensor, margin=0.01, layer=0):
+        for i in range(layer+1):
+            if (i == layer):
+                self.layers[layer].update_grid(x, margin)
+                return
+            x = self.layers[i](x)
+    
+    def init_from_statedict(self, state_dict_file):
+        params = torch.load(state_dict_file)
+        for i in range (len(self.width)-1):
+            self.layers[i].spline_weight.data.copy_(
+                params[f"layers.{i}.spline_weight"]
+            )
+            self.layers[i].grid.copy_(
+                params[f"layers.{i}.grid"]
+            )
+            self.layers[i].spline_scaler.data.copy_(
+                params[f"layers.{i}.spline_scaler"]
+            )
+
+            self.layers[i+1].in_features  = self.layers[i+1].in_features - count
+
