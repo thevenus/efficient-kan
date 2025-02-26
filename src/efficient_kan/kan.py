@@ -310,8 +310,8 @@ class KAN(torch.nn.Module):
                 return
             x = self.layers[i](x)
     
-    def init_from_statedict(self, state_dict_file):
-        params = torch.load(state_dict_file)
+    def init_from_statedict(self, state_dict_file, device=torch.device("cpu")):
+        params = torch.load(state_dict_file, map_location=device)
         for i in range (len(self.width)-1):
             self.layers[i].spline_weight.data.copy_(
                 params[f"layers.{i}.spline_weight"]
